@@ -1,0 +1,10 @@
+outputs/
+datasets/
+tomato/
+tests/
+*.pth
+__pycache__/
+.venv/
+*.pyc
+.idea/
+.vscode/

@@ -1,0 +1,20 @@
+model_name: ResNet50
+save_name: resnet50
+num_classes: 10
+epochs: 30
+lr: 0.001
+optimizer: Adam
+weight_decay: 0.0001
+batch_size: 32
+image_size: 224
+num_workers: 4
+num_folds: 5
+fold: null
+random_seed: 42
+early_stopping_patience: 5
+mixed_precision: true
+scheduler: CosineAnnealingLR
+scheduler_params:
+  T_max: 30
+  eta_min: 0.000001
+dataset_path: datasets

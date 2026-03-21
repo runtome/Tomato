@@ -1,0 +1,16 @@
+torch
+torchvision
+timm>=1.0
+torchinfo
+scikit-learn
+scipy
+numpy
+pandas
+matplotlib
+seaborn
+pyyaml
+tqdm
+opencv-python
+grad-cam
+Pillow
+open-clip-torch

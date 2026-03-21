@@ -9,19 +9,21 @@ from src.data.transforms import get_val_transforms
 from src.constants.labels import IMAGENET_MEAN, IMAGENET_STD
 
 
-TARGET_LAYER_MAP = {
-    "MobileNetV3": lambda m: m.blocks[-1],
-    "MobileNetV4": lambda m: m.blocks[-1],
-    "InceptionV3": lambda m: m.Mixed_7c,
-    "EfficientNetB1": lambda m: m.blocks[-1],
-    "ResNet50": lambda m: m.layer4[-1],
-}
+TARGET_LAYER_RULES = [
+    ("mobilenetv3", lambda m: m.blocks[-1]),
+    ("mobilenetv4", lambda m: m.blocks[-1]),
+    ("inception_v3", lambda m: m.Mixed_7c),
+    ("efficientnet", lambda m: m.blocks[-1]),
+    ("resnet", lambda m: m.layer4[-1]),
+]
 
 
 def get_target_layer(model, model_name):
-    if model_name not in TARGET_LAYER_MAP:
-        raise ValueError(f"No target layer defined for '{model_name}'")
-    return [TARGET_LAYER_MAP[model_name](model)]
+    name_lower = model_name.lower()
+    for prefix, layer_fn in TARGET_LAYER_RULES:
+        if prefix in name_lower:
+            return [layer_fn(model)]
+    raise ValueError(f"No target layer defined for '{model_name}'")
 
 
 def generate_gradcam(model, model_name, image_path, image_size, device):

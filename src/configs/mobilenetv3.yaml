@@ -1,4 +1,4 @@
-model_name: mobilenetv3_large_150d.ra4_e3600_r256_in1k
+model_name: mobilenetv3_large_100.ra4_e3600_r224_in1k
 save_name: mobilenetv3
 num_classes: 10
 epochs: 30

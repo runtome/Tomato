@@ -1,4 +1,4 @@
-model_name: MobileNetV4
+model_name: mobilenetv4_hybrid_medium.e500_r224_in1k
 save_name: mobilenetv4
 num_classes: 10
 epochs: 30

@@ -1,4 +1,4 @@
-model_name: EfficientNetB1
+model_name: efficientnet_b1.ra4_e3600_r240_in1k
 save_name: efficientnetb1
 num_classes: 10
 epochs: 30

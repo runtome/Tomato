@@ -310,6 +310,8 @@ def _process_split(
         shutil.rmtree(dst_dir)
 
     # Step 1: Filter 256x256
+    total_images = len([f for f in os.listdir(src_dir) if os.path.isfile(os.path.join(src_dir, f))])
+    print(f"  [{split_name}] Total images in folder: {total_images}")
     print(f"  [{split_name}] Filtering 256x256 images...")
     valid_files = _filter_256(src_dir)
     print(f"  [{split_name}] {len(valid_files)} images are 256x256")

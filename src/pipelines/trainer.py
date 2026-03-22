@@ -1,4 +1,5 @@
 import os
+import math
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -96,7 +97,10 @@ class Trainer:
 
                 with torch.amp.autocast("cuda", enabled=self.config.mixed_precision and self.device.type == "cuda"):
                     outputs = self.model(images)
-                    loss = self.criterion(outputs, labels)
+
+                # Cast to float32 before loss to prevent float16 overflow
+                outputs = outputs.float()
+                loss = self.criterion(outputs, labels)
 
                 running_loss += loss.item() * images.size(0)
                 total += images.size(0)
@@ -141,12 +145,14 @@ class Trainer:
                 f"Time: {t.elapsed:.1f}s"
             )
 
-            if val_loss < best_val_loss:
+            if math.isnan(val_loss) or math.isinf(val_loss):
+                print(f"  WARNING: val_loss is {val_loss}, skipping checkpoint & scheduler")
+            elif val_loss < best_val_loss:
                 best_val_loss = val_loss
                 save_checkpoint(self.model, self.optimizer, epoch, val_loss, ckpt_path)
                 print(f"  -> Saved best model (val_loss={val_loss:.4f})")
 
-            if self.scheduler is not None:
+            if self.scheduler is not None and not (math.isnan(val_loss) or math.isinf(val_loss)):
                 if isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
                     self.scheduler.step(val_loss)
                 else:

@@ -36,7 +36,6 @@ def _strip_aug_suffix(filename):
     """Remove augmentation suffix to get the base image name."""
     name, ext = os.path.splitext(filename)
     cleaned = AUG_SUFFIX_PATTERN.sub("", name + ext)
-    # Return just the name part (without ext) as group key
     return os.path.splitext(cleaned)[0]
 
 
@@ -78,7 +77,6 @@ def _load_clip_model(device):
 
 def _compute_clip_embeddings(image_paths, model, preprocess, device, batch_size=64):
     """Compute normalized CLIP embeddings for a list of image paths."""
-    import open_clip
     embeddings = []
     for i in range(0, len(image_paths), batch_size):
         batch_paths = image_paths[i : i + batch_size]
@@ -94,12 +92,14 @@ def _compute_clip_embeddings(image_paths, model, preprocess, device, batch_size=
     return np.concatenate(embeddings, axis=0)
 
 
-def _merge_groups_by_clip(groups, class_dir, model, preprocess, device, threshold=0.95):
+def _merge_groups_by_clip(groups, class_dir, model, preprocess, device, threshold=0.98):
     """
     For groups that have only 1 member (no filename-based match),
-    compute CLIP embeddings and merge those with cosine similarity > threshold.
+    compute CLIP embeddings and merge near-duplicates.
+
+    Uses clique-based merging instead of Union-Find to prevent transitive chaining:
+    all members in a merged group must have pairwise similarity > threshold.
     """
-    # Separate singleton groups from multi-member groups
     singletons = {}
     multi = {}
     for key, files in groups.items():
@@ -109,48 +109,106 @@ def _merge_groups_by_clip(groups, class_dir, model, preprocess, device, threshol
             multi[key] = files
 
     if len(singletons) <= 1:
-        # Nothing to merge
-        groups.update(multi)
-        return groups
+        result = dict(multi)
+        result.update(singletons)
+        return result
 
     singleton_keys = list(singletons.keys())
     singleton_paths = [os.path.join(class_dir, singletons[k][0]) for k in singleton_keys]
 
-    # Compute CLIP embeddings
     embeddings = _compute_clip_embeddings(singleton_paths, model, preprocess, device)
-
-    # Cosine similarity matrix
     sim_matrix = embeddings @ embeddings.T
 
-    # Union-Find to merge similar singletons
-    parent = list(range(len(singleton_keys)))
+    # Greedy clique-based merging:
+    # For each image, find its nearest neighbor. If sim > threshold AND the neighbor
+    # also has this image as a top match, merge them. Then grow the cluster only if
+    # a new candidate has sim > threshold with ALL existing members.
+    n = len(singleton_keys)
+    assigned = [False] * n
+    merged = {}
 
-    def find(x):
-        while parent[x] != x:
-            parent[x] = parent[parent[x]]
-            x = parent[x]
-        return x
-
-    def union(a, b):
-        ra, rb = find(a), find(b)
-        if ra != rb:
-            parent[ra] = rb
-
-    for i in range(len(singleton_keys)):
-        for j in range(i + 1, len(singleton_keys)):
+    # Sort pairs by similarity (highest first), only consider pairs above threshold
+    pairs = []
+    for i in range(n):
+        for j in range(i + 1, n):
             if sim_matrix[i, j] > threshold:
-                union(i, j)
+                pairs.append((sim_matrix[i, j], i, j))
+    pairs.sort(reverse=True)
 
-    # Build merged groups
-    merged = defaultdict(list)
-    for i, key in enumerate(singleton_keys):
-        root = find(i)
-        root_key = singleton_keys[root]
-        merged[root_key].extend(singletons[key])
+    # Build clusters: each cluster requires all pairwise sims > threshold
+    clusters = []  # list of sets
+    idx_to_cluster = {}
 
-    # Combine with multi-member groups
+    for sim, i, j in pairs:
+        ci = idx_to_cluster.get(i)
+        cj = idx_to_cluster.get(j)
+
+        if ci is not None and cj is not None:
+            # Both assigned — try to merge clusters if all cross-pairs above threshold
+            if ci == cj:
+                continue
+            cluster_i = clusters[ci]
+            cluster_j = clusters[cj]
+            can_merge = True
+            for a in cluster_i:
+                for b in cluster_j:
+                    if sim_matrix[a, b] <= threshold:
+                        can_merge = False
+                        break
+                if not can_merge:
+                    break
+            if can_merge:
+                # Merge j into i
+                for idx in cluster_j:
+                    cluster_i.add(idx)
+                    idx_to_cluster[idx] = ci
+                clusters[cj] = set()  # empty the old cluster
+        elif ci is not None:
+            # i assigned, check if j fits in i's cluster
+            cluster = clusters[ci]
+            if all(sim_matrix[j, m] > threshold for m in cluster):
+                cluster.add(j)
+                idx_to_cluster[j] = ci
+        elif cj is not None:
+            # j assigned, check if i fits in j's cluster
+            cluster = clusters[cj]
+            if all(sim_matrix[i, m] > threshold for m in cluster):
+                cluster.add(i)
+                idx_to_cluster[i] = cj
+        else:
+            # Neither assigned — new cluster
+            new_idx = len(clusters)
+            clusters.append({i, j})
+            idx_to_cluster[i] = new_idx
+            idx_to_cluster[j] = new_idx
+
+    # Build result
     result = dict(multi)
-    result.update(dict(merged))
+
+    # Add clusters
+    used = set()
+    for cluster in clusters:
+        if not cluster:
+            continue
+        members = sorted(cluster)
+        root_key = singleton_keys[members[0]]
+        for m in members:
+            result.setdefault(root_key, []).extend(singletons[singleton_keys[m]])
+            used.add(m)
+
+    # Add remaining singletons (not merged)
+    for i, key in enumerate(singleton_keys):
+        if i not in used:
+            result[key] = singletons[key]
+
+    # Print similarity diagnostics
+    if pairs:
+        top_sims = [s for s, _, _ in pairs[:10]]
+        print(f"    CLIP: {len(pairs)} pairs above threshold {threshold:.2f}, "
+              f"top similarities: {', '.join(f'{s:.4f}' for s in top_sims)}")
+    else:
+        print(f"    CLIP: no pairs above threshold {threshold:.2f}")
+
     return result
 
 
@@ -175,7 +233,6 @@ def _select_groups(groups, target_count, seed):
             selected_files.extend(files)
             selected_groups.append(key)
         else:
-            # Take a subset from this group
             subset = rng.sample(files, remaining)
             selected_files.extend(subset)
             selected_groups.append(key)
@@ -190,7 +247,7 @@ def prepare_dataset(
     train_per_class=1000,
     test_per_class=200,
     seed=42,
-    clip_threshold=0.95,
+    clip_threshold=0.98,
     use_clip=True,
 ):
     random.seed(seed)
@@ -256,21 +313,29 @@ def _process_split(
     # Step 2: Group by filename
     groups = _group_by_filename(valid_files)
     num_filename_groups = len(groups)
+    num_filename_multi = sum(1 for v in groups.values() if len(v) > 1)
 
     # Step 3: CLIP-based merging
     if clip_model is not None:
-        print(f"  [{split_name}] Computing CLIP embeddings for singleton groups...")
+        num_singletons = sum(1 for v in groups.values() if len(v) == 1)
+        print(f"  [{split_name}] Computing CLIP embeddings for {num_singletons} singleton groups...")
         groups = _merge_groups_by_clip(
             groups, src_dir, clip_model, clip_preprocess, device, threshold
         )
 
     num_final_groups = len(groups)
-    total_images = sum(len(v) for v in groups.values())
     multi_groups = sum(1 for v in groups.values() if len(v) > 1)
-    print(
-        f"  [{split_name}] Groups: {num_filename_groups} (filename) -> {num_final_groups} (after CLIP merge)"
-    )
-    print(f"  [{split_name}] {multi_groups} groups have multiple images (augmentations)")
+
+    # Print group size distribution
+    sizes = [len(v) for v in groups.values()]
+    size_dist = defaultdict(int)
+    for s in sizes:
+        size_dist[s] += 1
+    dist_str = ", ".join(f"size {k}: {v}" for k, v in sorted(size_dist.items()))
+
+    print(f"  [{split_name}] Groups: {num_filename_groups} (filename, {num_filename_multi} multi)"
+          f" -> {num_final_groups} (after CLIP)")
+    print(f"  [{split_name}] {multi_groups} groups have augmentations | Distribution: {dist_str}")
 
     # Step 4: Select
     selected_files, selected_group_keys = _select_groups(groups, target_count, seed)

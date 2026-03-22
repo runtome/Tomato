@@ -36,27 +36,39 @@ class Evaluator:
     def evaluate_loader(self, model, loader):
         all_preds = []
         all_labels = []
-        inference_times = []
+        per_image_times = []
 
         with torch.no_grad():
-            for images, labels in tqdm(loader, desc="Evaluating", leave=False):
+            for batch_idx, (images, labels) in enumerate(tqdm(loader, desc="Evaluating", leave=False)):
                 images = images.to(self.device)
+                batch_size = images.size(0)
 
-                start = time.perf_counter()
-                with torch.amp.autocast("cuda", enabled=self.config.mixed_precision and self.device.type == "cuda"):
-                    outputs = model(images)
-                if self.device.type == "cuda":
-                    torch.cuda.synchronize()
-                elapsed = time.perf_counter() - start
+                # Warmup: skip first batch timing (GPU kernel init)
+                if batch_idx == 0:
+                    with torch.amp.autocast("cuda", enabled=self.config.mixed_precision and self.device.type == "cuda"):
+                        outputs = model(images)
+                    if self.device.type == "cuda":
+                        torch.cuda.synchronize()
+                    outputs = outputs.float()
+                else:
+                    start = time.perf_counter()
+                    with torch.amp.autocast("cuda", enabled=self.config.mixed_precision and self.device.type == "cuda"):
+                        outputs = model(images)
+                    if self.device.type == "cuda":
+                        torch.cuda.synchronize()
+                    elapsed = time.perf_counter() - start
+                    outputs = outputs.float()
 
-                inference_times.append(elapsed)
+                    # Per-image time
+                    per_image_times.extend([elapsed / batch_size] * batch_size)
+
                 preds = outputs.argmax(dim=1)
                 all_preds.extend(preds.cpu().numpy())
                 all_labels.extend(labels.numpy())
 
         metrics = compute_metrics(all_labels, all_preds)
         cm = compute_confusion_matrix(all_labels, all_preds, NUM_CLASSES)
-        return metrics, cm, inference_times
+        return metrics, cm, per_image_times
 
     def evaluate_fold(self, fold, test_loader, train_loader=None, val_loader=None):
         print(f"\n--- Evaluating Fold {fold} ---")
@@ -79,6 +91,10 @@ class Evaluator:
         results["confusion_matrix"] = cm
         results["inference_times"] = inf_times
         print(f"  Test  — Acc: {metrics['accuracy']:.4f} | F1: {metrics['f1']:.4f}")
+        if inf_times:
+            avg_t = np.mean(inf_times) * 1000
+            std_t = np.std(inf_times, ddof=1) * 1000
+            print(f"  Test  — Inference time (per image): {avg_t:.4f} ± {std_t:.4f} ms")
 
         # Save confusion matrix
         save_dir = os.path.join("outputs", "models", self.config.save_name, "confusion-matrix")
@@ -117,6 +133,6 @@ class Evaluator:
 
         avg_inf = np.mean(all_inference_times)
         std_inf = np.std(all_inference_times, ddof=1)
-        print(f"  Inference time (per batch): {avg_inf*1000:.2f} ± {std_inf*1000:.2f} ms")
+        print(f"  Inference time (per image): {avg_inf*1000:.4f} ± {std_inf*1000:.4f} ms")
 
         return aggregated

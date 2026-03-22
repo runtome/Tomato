@@ -305,6 +305,10 @@ def _process_split(
         print(f"  WARNING: {src_dir} not found")
         return
 
+    # Step 0: Clean destination directory
+    if os.path.isdir(dst_dir):
+        shutil.rmtree(dst_dir)
+
     # Step 1: Filter 256x256
     print(f"  [{split_name}] Filtering 256x256 images...")
     valid_files = _filter_256(src_dir)

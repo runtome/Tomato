@@ -15,7 +15,7 @@ def main():
     parser.add_argument("--train-per-class", type=int, default=1000, help="Train images per class")
     parser.add_argument("--test-per-class", type=int, default=200, help="Test images per class")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
-    parser.add_argument("--clip-threshold", type=float, default=0.95, help="CLIP similarity threshold for merging")
+    parser.add_argument("--clip-threshold", type=float, default=0.98, help="CLIP similarity threshold for merging")
     parser.add_argument("--no-clip", action="store_true", help="Skip CLIP-based merging (filename grouping only)")
     args = parser.parse_args()
 

@@ -2,10 +2,10 @@ model_name: inception_v3
 save_name: inceptionv3
 num_classes: 10
 epochs: 30
-lr: 0.001
-optimizer: Adam
+lr: 0.0005
+optimizer: AdamW
 weight_decay: 0.0001
-batch_size: 32
+batch_size: 16
 image_size: 299
 num_workers: 4
 num_folds: 5

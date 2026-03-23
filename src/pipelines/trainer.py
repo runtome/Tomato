@@ -43,11 +43,21 @@ class Trainer:
 
     def _build_scheduler(self):
         cfg = self.config
-        params = cfg.scheduler_params or {}
+        params = dict(cfg.scheduler_params or {})
+        warmup_epochs = params.pop("warmup_epochs", 0)
+
         if cfg.scheduler == "CosineAnnealingLR":
-            return torch.optim.lr_scheduler.CosineAnnealingLR(
+            cosine = torch.optim.lr_scheduler.CosineAnnealingLR(
                 self.optimizer, **params
             )
+            if warmup_epochs > 0:
+                warmup = torch.optim.lr_scheduler.LinearLR(
+                    self.optimizer, start_factor=0.1, total_iters=warmup_epochs
+                )
+                return torch.optim.lr_scheduler.SequentialLR(
+                    self.optimizer, schedulers=[warmup, cosine], milestones=[warmup_epochs]
+                )
+            return cosine
         elif cfg.scheduler == "StepLR":
             return torch.optim.lr_scheduler.StepLR(
                 self.optimizer, **params

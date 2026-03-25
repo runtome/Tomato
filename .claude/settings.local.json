@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(python:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(find /d/code/260319_Tomato/Tomato -type f \\\\\\(-name *.pt -o -name *.pth -o -name *.h5 -o -name *.onnx -o -name *.weights \\\\\\))",
+      "Bash(ls:*)"
     ]
   }
 }

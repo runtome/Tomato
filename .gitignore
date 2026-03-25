@@ -2,7 +2,6 @@ outputs/
 datasets/
 tomato/
 tests/
-models/
 *.pth
 __pycache__/
 .venv/

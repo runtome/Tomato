@@ -1,5 +1,6 @@
 import os
 import math
+import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -7,10 +8,11 @@ from tqdm import tqdm
 
 from src.models.factory import create_model
 from src.utils.device import get_device
-from src.utils.checkpoint import save_checkpoint
+from src.utils.checkpoint import save_checkpoint, load_checkpoint
 from src.utils.early_stopping import EarlyStopping
 from src.utils.timer import Timer
-from src.visualization.plots import plot_loss_curves
+from src.visualization.plots import plot_loss_curves, plot_roc_curve
+from src.constants.labels import CLASS_NAMES
 
 
 class Trainer:
@@ -99,6 +101,7 @@ class Trainer:
         total = 0
         all_preds = []
         all_labels = []
+        all_probs = []
 
         with torch.no_grad():
             for images, labels in tqdm(val_loader, desc="Validating", leave=False):
@@ -114,11 +117,13 @@ class Trainer:
 
                 running_loss += loss.item() * images.size(0)
                 total += images.size(0)
+                probs = torch.softmax(outputs, dim=1)
                 preds = outputs.argmax(dim=1)
                 all_preds.extend(preds.cpu().numpy())
                 all_labels.extend(labels.cpu().numpy())
+                all_probs.extend(probs.cpu().numpy())
 
-        return running_loss / total, all_preds, all_labels
+        return running_loss / total, all_preds, all_labels, all_probs
 
     def fit(self, train_loader, val_loader, fold):
         cfg = self.config
@@ -142,7 +147,7 @@ class Trainer:
         for epoch in range(1, cfg.epochs + 1):
             with Timer() as t:
                 train_loss = self.train_one_epoch(train_loader)
-                val_loss, val_preds, val_labels = self.validate(val_loader)
+                val_loss, val_preds, val_labels, _ = self.validate(val_loader)
 
             epoch_times.append(t.elapsed)
             train_losses.append(train_loss)
@@ -178,6 +183,18 @@ class Trainer:
             save_path=graph_path,
         )
         print(f"Loss graph saved to {graph_path}")
+
+        # Generate ROC curve from best model
+        load_checkpoint(self.model, ckpt_path, device=self.device)
+        _, _, roc_labels, roc_probs = self.validate(val_loader)
+        roc_dir = os.path.join(save_dir, "roc_curve")
+        roc_path = os.path.join(roc_dir, f"{cfg.save_name}_fold_{fold}.png")
+        plot_roc_curve(
+            np.array(roc_labels), np.array(roc_probs), CLASS_NAMES,
+            title=f"{cfg.save_name} Fold #{fold} — ROC Curve",
+            save_path=roc_path,
+        )
+        print(f"ROC curve saved to {roc_path}")
 
         total_time = sum(epoch_times)
         avg_epoch_time = total_time / len(epoch_times)
